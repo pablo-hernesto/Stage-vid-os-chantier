@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>&nbsp;</title>
+
+<!--
+  ==========================================================
+   MODE D'EMPLOI
+  ==========================================================
+
+  Nomme tes vidéos ainsi, et dépose-les à côté de ce fichier :
+
+      video1.mp4
+      video2.mp4
+      video3.mp4   ... et ainsi de suite
+
+  C'est tout. Aucune ligne à modifier ici.
+  La page les trouve seule et les enchaîne dans l'ordre, en boucle.
+
+  Format : .mp4 (codec H.264). Un .MOV d'iPhone ne se lira pas
+  dans un navigateur : il faut le convertir en .mp4 avant.
+
+  ==========================================================
+-->
+
+<style>
+  html,body{margin:0;padding:0;height:100%;width:100%;background:#000;overflow:hidden}
+  video{
+    position:fixed;inset:0;width:100%;height:100%;
+    object-fit:contain;background:#000;display:block;border:0;
+  }
+  /* bouton de démarrage : n'apparaît que si le navigateur refuse l'autoplay */
+  #tap{
+    position:fixed;inset:0;z-index:10;display:none;
+    align-items:center;justify-content:center;background:#000;cursor:pointer;
+  }
+  #tap.on{display:flex}
+  #tap svg{width:60px;height:60px;opacity:.45;transition:opacity .2s}
+  #tap:active svg,#tap:hover svg{opacity:.85}
+</style>
+</head>
+<body>
+
+<video id="v" autoplay muted playsinline webkit-playsinline></video>
+
+<div id="tap" role="button" tabindex="0" aria-label="Démarrer">
+  <svg viewBox="0 0 24 24" fill="#EFE9DE"><path d="M8 5v14l11-7z"/></svg>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  var MAX = 40;        // cherche jusqu'à video40.mp4
+  var EXT = ["mp4","webm","m4v"];
+
+  var v = document.getElementById("v");
+  var tap = document.getElementById("tap");
+  var list = [], idx = 0;
+
+  /* ---- vérifie l'existence d'un fichier sans le télécharger ---- */
+  function exists(url){
+    return new Promise(function(res){
+      var x = new XMLHttpRequest();
+      x.open("HEAD", url, true);
+      x.onload  = function(){ res(x.status >= 200 && x.status < 300); };
+      x.onerror = function(){ res(false); };
+      x.timeout = 8000;
+      x.ontimeout = function(){ res(false); };
+      x.send();
+    });
+  }
+
+  /* ---- construit la liste : video1, video2, video3… ---- */
+  function build(){
+    var seq = Promise.resolve();
+    var stop = false;
+
+    for (var i = 1; i <= MAX; i++) {
+      (function(n){
+        seq = seq.then(function(){
+          if (stop) return;
+          var tries = EXT.map(function(e){ return "video" + n + "." + e; });
+          return tries.reduce(function(p, url){
+            return p.then(function(found){
+              if (found) return found;
+              return exists(url).then(function(ok){ return ok ? url : null; });
+            });
+          }, Promise.resolve(null)).then(function(found){
+            if (found) list.push(found);
+            else if (n > 1) stop = true;   // trou dans la numérotation → on arrête
+          });
+        });
+      })(i);
+    }
+    return seq;
+  }
+
+  /* ---- lecture enchaînée ---- */
+  function play(i){
+    if (!list.length) return;
+    idx = ((i % list.length) + list.length) % list.length;
+    v.src = list[idx];
+    v.load();
+    var p = v.play();
+    if (p && p.catch) p.catch(function(){ tap.classList.add("on"); });
+    preload((idx + 1) % list.length);
+  }
+
+  function preload(i){
+    if (!list[i] || list.length < 2) return;
+    var pv = document.createElement("video");
+    pv.preload = "auto";
+    pv.src = list[i];
+  }
+
+  v.addEventListener("ended", function(){ play(idx + 1); });
+  v.addEventListener("error", function(){
+    if (list.length > 1) setTimeout(function(){ play(idx + 1); }, 600);
+  });
+
+  /* ---- geste de démarrage (son + plein écran) ---- */
+  function begin(){
+    tap.classList.remove("on");
+    v.muted = false;
+    try {
+      var el = document.documentElement;
+      if (el.requestFullscreen) el.requestFullscreen().catch(function(){});
+      else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+    } catch(e){}
+    try { if (navigator.wakeLock) navigator.wakeLock.request("screen").catch(function(){}); } catch(e){}
+    var p = v.play();
+    if (p && p.catch) p.catch(function(){});
+  }
+  tap.addEventListener("click", begin);
+  tap.addEventListener("keydown", function(e){
+    if (e.key === "Enter" || e.key === " ") begin();
+  });
+
+  /* un simple contact sur l'écran rétablit le son, où qu'on appuie */
+  document.addEventListener("click", function(){
+    if (v.muted) { v.muted = false; var p = v.play(); if (p && p.catch) p.catch(function(){}); }
+  }, { passive: true });
+
+  /* ---- démarrage ---- */
+  build().then(function(){
+    if (!list.length) return;   // rien trouvé : écran noir, pas de message
+    play(0);
+    setTimeout(function(){ if (v.paused) tap.classList.add("on"); }, 1200);
+  });
+
+  /* relance si le système a mis la lecture en pause (veille, appel…) */
+  document.addEventListener("visibilitychange", function(){
+    if (!document.hidden && v.paused && list.length) {
+      var p = v.play(); if (p && p.catch) p.catch(function(){});
+    }
+  });
+})();
+</script>
+</body>
+</html>
